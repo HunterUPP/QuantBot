@@ -60,7 +60,7 @@ func NewGateIo(opt Option) Exchange {
 			"QTUM/USDT": 0.001,
 		},
 		records: make(map[string][]Record),
-		host:    "https://data.gateio.io/api2/1/",
+		host:    "https://data.gateio.co/api2/1/",
 		logger:  model.Logger{TraderID: opt.TraderID, ExchangeType: opt.Type},
 		option:  opt,
 
