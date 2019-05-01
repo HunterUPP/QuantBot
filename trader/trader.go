@@ -4,9 +4,9 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/phonegapX/QuantBot/api"
-	"github.com/phonegapX/QuantBot/constant"
-	"github.com/phonegapX/QuantBot/model"
+	"github.com/HunterUPP/QuantBot/api"
+	"github.com/HunterUPP/QuantBot/constant"
+	"github.com/HunterUPP/QuantBot/model"
 	"github.com/robertkrimen/otto"
 )
 

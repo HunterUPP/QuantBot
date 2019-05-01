@@ -4,8 +4,8 @@ import (
 	"fmt"
 
 	"github.com/hprose/hprose-golang/rpc"
-	"github.com/phonegapX/QuantBot/constant"
-	"github.com/phonegapX/QuantBot/model"
+	"github.com/HunterUPP/QuantBot/constant"
+	"github.com/HunterUPP/QuantBot/model"
 )
 
 type user struct{}

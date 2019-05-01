@@ -7,11 +7,11 @@ import (
 	"time"
 
 	"github.com/miaolz123/conver"
-	"github.com/phonegapX/QuantBot/api/HuobiProAPI/config"
-	"github.com/phonegapX/QuantBot/api/HuobiProAPI/models"
-	"github.com/phonegapX/QuantBot/api/HuobiProAPI/services"
-	"github.com/phonegapX/QuantBot/constant"
-	"github.com/phonegapX/QuantBot/model"
+	"github.com/HunterUPP/QuantBot/api/HuobiProAPI/config"
+	"github.com/HunterUPP/QuantBot/api/HuobiProAPI/models"
+	"github.com/HunterUPP/QuantBot/api/HuobiProAPI/services"
+	"github.com/HunterUPP/QuantBot/constant"
+	"github.com/HunterUPP/QuantBot/model"
 )
 
 // Huobi the exchange struct of huobi.com

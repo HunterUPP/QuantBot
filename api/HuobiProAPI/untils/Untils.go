@@ -13,7 +13,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/phonegapX/QuantBot/api/HuobiProAPI/config"
+	"github.com/HunterUPP/QuantBot/api/HuobiProAPI/config"
 	//"golang.org/x/net/proxy"
 )
 

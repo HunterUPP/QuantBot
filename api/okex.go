@@ -8,8 +8,8 @@ import (
 
 	"github.com/bitly/go-simplejson"
 	"github.com/miaolz123/conver"
-	"github.com/phonegapX/QuantBot/constant"
-	"github.com/phonegapX/QuantBot/model"
+	"github.com/HunterUPP/QuantBot/constant"
+	"github.com/HunterUPP/QuantBot/model"
 )
 
 // OKEX the exchange struct of okex.com

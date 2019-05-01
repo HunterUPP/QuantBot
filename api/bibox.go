@@ -5,14 +5,14 @@ import (
 	"strings"
 	"time"
 
-	"github.com/bitly/go-simplejson"
-	"github.com/miaolz123/conver"
 	"github.com/HunterUPP/QuantBot/constant"
 	"github.com/HunterUPP/QuantBot/model"
+	"github.com/bitly/go-simplejson"
+	"github.com/miaolz123/conver"
 )
 
-// GateIo the exchange struct of gateio.io
-type GateIo struct {
+// BIBOX the exchange struct of bibox.io
+type BIBOX struct {
 	stockTypeMap     map[string]string
 	tradeTypeMap     map[string]string
 	recordsPeriodMap map[string]string
@@ -27,9 +27,9 @@ type GateIo struct {
 	lastTimes int64
 }
 
-// NewGateIo create an exchange struct of gateio.io
-func NewGateIo(opt Option) Exchange {
-	return &GateIo{
+// NewBibox create an exchange struct of bibox.io
+func NewBibox(opt Option) Exchange {
+	return &BIBOX{
 		stockTypeMap: map[string]string{
 			"BTC/USDT":  "btc",
 			"ETH/USDT":  "eth",
@@ -60,7 +60,7 @@ func NewGateIo(opt Option) Exchange {
 			"QTUM/USDT": 0.001,
 		},
 		records: make(map[string][]Record),
-		host:    "https://data.gateio.co/api2/1/",
+		host:    "https://data.bibox.io/api2/1/",
 		logger:  model.Logger{TraderID: opt.TraderID, ExchangeType: opt.Type},
 		option:  opt,
 
@@ -70,28 +70,28 @@ func NewGateIo(opt Option) Exchange {
 }
 
 // Log print something to console
-func (e *GateIo) Log(msgs ...interface{}) {
+func (e *BIBOX) Log(msgs ...interface{}) {
 	e.logger.Log(constant.INFO, "", 0.0, 0.0, msgs...)
 }
 
 // GetType get the type of this exchange
-func (e *GateIo) GetType() string {
+func (e *BIBOX) GetType() string {
 	return e.option.Type
 }
 
 // GetName get the name of this exchange
-func (e *GateIo) GetName() string {
+func (e *BIBOX) GetName() string {
 	return e.option.Name
 }
 
 // SetLimit set the limit calls amount per second of this exchange
-func (e *GateIo) SetLimit(times interface{}) float64 {
+func (e *BIBOX) SetLimit(times interface{}) float64 {
 	e.limit = conver.Float64Must(times)
 	return e.limit
 }
 
 // AutoSleep auto sleep to achieve the limit calls amount per second of this exchange
-func (e *GateIo) AutoSleep() {
+func (e *BIBOX) AutoSleep() {
 	now := time.Now().UnixNano()
 	interval := 1e+9/e.limit*conver.Float64Must(e.lastTimes) - conver.Float64Must(now-e.lastSleep)
 	if interval > 0.0 {
@@ -102,11 +102,11 @@ func (e *GateIo) AutoSleep() {
 }
 
 // GetMinAmount get the min trade amonut of this exchange
-func (e *GateIo) GetMinAmount(stock string) float64 {
+func (e *BIBOX) GetMinAmount(stock string) float64 {
 	return e.minAmountMap[stock]
 }
 
-func (e *GateIo) getAuthJSON(url string, params []string) (json *simplejson.Json, err error) {
+func (e *BIBOX) getAuthJSON(url string, params []string) (json *simplejson.Json, err error) {
 	e.lastTimes++
 	resp, err := post_gateio(url, params, e.option.AccessKey, signSha512(params, e.option.SecretKey))
 	if err != nil {
@@ -116,7 +116,7 @@ func (e *GateIo) getAuthJSON(url string, params []string) (json *simplejson.Json
 }
 
 // GetAccount get the account detail of this exchange
-func (e *GateIo) GetAccount() interface{} {
+func (e *BIBOX) GetAccount() interface{} {
 	json, err := e.getAuthJSON(e.host+"private/balances", []string{})
 	if err != nil {
 		e.logger.Log(constant.ERROR, "", 0.0, 0.0, "GetAccount() error, ", err)
@@ -144,7 +144,7 @@ func (e *GateIo) GetAccount() interface{} {
 }
 
 // Trade place an order
-func (e *GateIo) Trade(tradeType string, stockType string, _price, _amount interface{}, msgs ...interface{}) interface{} {
+func (e *BIBOX) Trade(tradeType string, stockType string, _price, _amount interface{}, msgs ...interface{}) interface{} {
 	stockType = strings.ToUpper(stockType)
 	tradeType = strings.ToUpper(tradeType)
 	price := conver.Float64Must(_price)
@@ -164,7 +164,7 @@ func (e *GateIo) Trade(tradeType string, stockType string, _price, _amount inter
 	}
 }
 
-func (e *GateIo) buy(stockType string, price, amount float64, msgs ...interface{}) interface{} {
+func (e *BIBOX) buy(stockType string, price, amount float64, msgs ...interface{}) interface{} {
 	params := []string{
 		"currencyPair=" + e.stockTypeMap[stockType] + "_usdt",
 	}
@@ -184,7 +184,7 @@ func (e *GateIo) buy(stockType string, price, amount float64, msgs ...interface{
 	return fmt.Sprint(json.Get("orderNumber").Interface())
 }
 
-func (e *GateIo) sell(stockType string, price, amount float64, msgs ...interface{}) interface{} {
+func (e *BIBOX) sell(stockType string, price, amount float64, msgs ...interface{}) interface{} {
 	params := []string{
 		"currencyPair=" + e.stockTypeMap[stockType] + "_usdt",
 	}
@@ -205,7 +205,7 @@ func (e *GateIo) sell(stockType string, price, amount float64, msgs ...interface
 }
 
 // GetOrder get details of an order
-func (e *GateIo) GetOrder(stockType, id string) interface{} {
+func (e *BIBOX) GetOrder(stockType, id string) interface{} {
 	stockType = strings.ToUpper(stockType)
 	if _, ok := e.stockTypeMap[stockType]; !ok {
 		e.logger.Log(constant.ERROR, "", 0.0, 0.0, "GetOrder() error, unrecognized stockType: ", stockType)
@@ -236,7 +236,7 @@ func (e *GateIo) GetOrder(stockType, id string) interface{} {
 }
 
 // GetOrders get all unfilled orders
-func (e *GateIo) GetOrders(stockType string) interface{} {
+func (e *BIBOX) GetOrders(stockType string) interface{} {
 	stockType = strings.ToUpper(stockType)
 	orders := []Order{}
 	if _, ok := e.stockTypeMap[stockType]; !ok {
@@ -269,12 +269,12 @@ func (e *GateIo) GetOrders(stockType string) interface{} {
 }
 
 // GetTrades get all filled orders recently
-func (e *GateIo) GetTrades(stockType string) interface{} {
+func (e *BIBOX) GetTrades(stockType string) interface{} {
 	return nil
 }
 
 // CancelOrder cancel an order
-func (e *GateIo) CancelOrder(order Order) bool {
+func (e *BIBOX) CancelOrder(order Order) bool {
 	params := []string{
 		"currencyPair=" + e.stockTypeMap[order.StockType] + "_usdt",
 		"orderNumber=" + order.ID,
@@ -293,13 +293,13 @@ func (e *GateIo) CancelOrder(order Order) bool {
 }
 
 // getTicker get market ticker & depth
-func (e *GateIo) getTicker(stockType string, sizes ...interface{}) (ticker Ticker, err error) {
+func (e *BIBOX) getTicker(stockType string, sizes ...interface{}) (ticker Ticker, err error) {
 	stockType = strings.ToUpper(stockType)
 	if _, ok := e.stockTypeMap[stockType]; !ok {
 		err = fmt.Errorf("GetTicker() error, unrecognized stockType: %+v", stockType)
 		return
 	}
-	resp, err := get(fmt.Sprintf("http://data.gateio.io/api2/1/orderBook/%v_usdt", e.stockTypeMap[stockType]))
+	resp, err := get(fmt.Sprintf("http://data.bibox.io/api2/1/orderBook/%v_usdt", e.stockTypeMap[stockType]))
 	if err != nil {
 		err = fmt.Errorf("GetTicker() error, %+v", err)
 		return
@@ -336,7 +336,7 @@ func (e *GateIo) getTicker(stockType string, sizes ...interface{}) (ticker Ticke
 }
 
 // GetTicker get market ticker & depth
-func (e *GateIo) GetTicker(stockType string, sizes ...interface{}) interface{} {
+func (e *BIBOX) GetTicker(stockType string, sizes ...interface{}) interface{} {
 	ticker, err := e.getTicker(stockType, sizes...)
 	if err != nil {
 		e.logger.Log(constant.ERROR, "", 0.0, 0.0, err)
@@ -346,6 +346,6 @@ func (e *GateIo) GetTicker(stockType string, sizes ...interface{}) interface{} {
 }
 
 // GetRecords get candlestick data
-func (e *GateIo) GetRecords(stockType, period string, sizes ...interface{}) interface{} {
+func (e *BIBOX) GetRecords(stockType, period string, sizes ...interface{}) interface{} {
 	return nil
 }

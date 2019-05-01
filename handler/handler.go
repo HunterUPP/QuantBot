@@ -9,8 +9,8 @@ import (
 	"time"
 
 	"github.com/hprose/hprose-golang/rpc"
-	"github.com/phonegapX/QuantBot/config"
-	"github.com/phonegapX/QuantBot/constant"
+	"github.com/HunterUPP/QuantBot/config"
+	"github.com/HunterUPP/QuantBot/constant"
 )
 
 type response struct {
