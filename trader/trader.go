@@ -20,6 +20,7 @@ var (
 		constant.Huobi:      api.NewHuobi,
 		constant.Binance:    api.NewBinance,
 		constant.GateIo:     api.NewGateIo,
+		constant.Bibox:      api.NewBibox,
 		constant.Poloniex:   api.NewPoloniex,
 		constant.OkexFuture: api.NewOkexFuture,
 		constant.BigOne:     api.NewBigOne,

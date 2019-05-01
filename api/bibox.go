@@ -1,6 +1,11 @@
 package api
 
+///https://github.com/Biboxcom/API_Docs/wiki
 import (
+	"crypto/hmac"
+	"crypto/md5"
+	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -31,11 +36,11 @@ type BIBOX struct {
 func NewBibox(opt Option) Exchange {
 	return &BIBOX{
 		stockTypeMap: map[string]string{
-			"BTC/USDT":  "btc",
-			"ETH/USDT":  "eth",
-			"EOS/USDT":  "eos",
-			"ONT/USDT":  "ont",
-			"QTUM/USDT": "qtum",
+			"BTC/USDT":  "BTC_USDT",
+			"ETH/USDT":  "ETH_USDT",
+			"EOS/USDT":  "EOS_USDT",
+			"ONT/USDT":  "ONT_USDT",
+			"QTUM/USDT": "QTUM_USDT",
 		},
 		tradeTypeMap: map[string]string{
 			"buy":         constant.TradeTypeBuy,
@@ -60,7 +65,7 @@ func NewBibox(opt Option) Exchange {
 			"QTUM/USDT": 0.001,
 		},
 		records: make(map[string][]Record),
-		host:    "https://data.bibox.io/api2/1/",
+		host:    "https://api.bibox365.com/v1/",
 		logger:  model.Logger{TraderID: opt.TraderID, ExchangeType: opt.Type},
 		option:  opt,
 
@@ -115,32 +120,89 @@ func (e *BIBOX) getAuthJSON(url string, params []string) (json *simplejson.Json,
 	return simplejson.NewJson(resp)
 }
 
+func (e *BIBOX) getSign(params string) string {
+	e.lastTimes++
+	key := []byte(e.option.SecretKey)
+	mac := hmac.New(md5.New, key)
+	mac.Write([]byte(params))
+	return hex.EncodeToString(mac.Sum(nil))
+	// return fmt.Sprintf("%x", mac.Sum(nil))
+}
+
+type UserAsset struct {
+	Cmd  string         `json:"cmd"`
+	Body UserAssetsBody `json:"body"`
+}
+
+type UserAssetsBody struct {
+	Select int `json:"select"`
+}
+
 // GetAccount get the account detail of this exchange
 func (e *BIBOX) GetAccount() interface{} {
-	json, err := e.getAuthJSON(e.host+"private/balances", []string{})
+
+	param := UserAsset{
+		Cmd: "transfer/assets",
+		Body: UserAssetsBody{
+			Select: 1,
+		},
+	}
+	params := []UserAsset{}
+	params = append(params, param)
+	cmds, _ := json.Marshal(&params)
+
+	forms := []string{}
+	cmdsItem := "cmds=" + string(cmds)
+	keyItem := "apikey=" + e.option.AccessKey
+	signItem := "sign=" + e.getSign(string(cmds))
+	forms = append(forms, cmdsItem)
+	forms = append(forms, keyItem)
+	forms = append(forms, signItem)
+
+	resp, err := post(e.host+"transfer", forms)
 	if err != nil {
 		e.logger.Log(constant.ERROR, "", 0.0, 0.0, "GetAccount() error, ", err)
 		return false
 	}
-	if result := json.Get("result").MustString(); result != "true" {
-		err = fmt.Errorf("the error message => %s", json.Get("message").MustString())
+
+	jsonResp, err := simplejson.NewJson(resp)
+	if err != nil {
 		e.logger.Log(constant.ERROR, "", 0.0, 0.0, "GetAccount() error, ", err)
 		return false
 	}
-	return map[string]float64{
-		"USDT":       conver.Float64Must(json.GetPath("available", "USDT").Interface()),
-		"FrozenUSDT": conver.Float64Must(json.GetPath("locked", "USDT").Interface()),
-		"BTC":        conver.Float64Must(json.GetPath("available", "BTC").Interface()),
-		"FrozenBTC":  conver.Float64Must(json.GetPath("locked", "BTC").Interface()),
-		"ETH":        conver.Float64Must(json.GetPath("available", "ETH").Interface()),
-		"FrozenETH":  conver.Float64Must(json.GetPath("locked", "ETH").Interface()),
-		"EOS":        conver.Float64Must(json.GetPath("available", "EOS").Interface()),
-		"FrozenEOS":  conver.Float64Must(json.GetPath("locked", "EOS").Interface()),
-		"ONT":        conver.Float64Must(json.GetPath("available", "ONT").Interface()),
-		"FrozenONT":  conver.Float64Must(json.GetPath("locked", "ONT").Interface()),
-		"QTUM":       conver.Float64Must(json.GetPath("available", "QTUM").Interface()),
-		"FrozenQTUM": conver.Float64Must(json.GetPath("locked", "QTUM").Interface()),
+
+	jsons := jsonResp.Get("result").GetIndex(0)
+	balancesArray, err := jsons.Get("result").Get("assets_list").Array()
+	if err != nil {
+		e.logger.Log(constant.ERROR, "", 0.0, 0.0, "GetAccount() error, ", err)
+		return false
 	}
+
+	result := map[string]float64{
+		"USDT":       0,
+		"FrozenUSDT": 0,
+		"BTC":        0,
+		"FrozenBTC":  0,
+		"ETH":        0,
+		"FrozenETH":  0,
+		"EOS":        0,
+		"FrozenEOS":  0,
+		"ONT":        0,
+		"FrozenONT":  0,
+		"QTUM":       0,
+		"FrozenQTUM": 0,
+	}
+	for i, _ := range balancesArray {
+		balance := jsons.Get("result").Get("assets_list").GetIndex(i)
+		symbol := strings.ToUpper(balance.Get("coin_symbol").MustString())
+		avail := balance.Get("balance").MustString()
+		freeze := balance.Get("freeze").MustString()
+
+		result[symbol] = conver.Float64Must(avail)
+		result["Frozen"+symbol] = conver.Float64Must(freeze)
+	}
+
+	return result
 }
 
 // Trade place an order
@@ -164,44 +226,125 @@ func (e *BIBOX) Trade(tradeType string, stockType string, _price, _amount interf
 	}
 }
 
+type OrderTrade struct {
+	Cmd   string      `json:"cmd"`
+	Index int         `json:"index"`
+	Body  OrderDetail `json:"body"`
+}
+
+type OrderDetail struct {
+	Pair         string  `json:"pair"`
+	Account_type int     `json:"account_type"`
+	Order_type   int     `json:"order_type"`
+	Order_side   int     `json:"order_side"`
+	Price        float64 `json:"price"`
+	Amount       float64 `json:"amount"`
+}
+
 func (e *BIBOX) buy(stockType string, price, amount float64, msgs ...interface{}) interface{} {
-	params := []string{
-		"currencyPair=" + e.stockTypeMap[stockType] + "_usdt",
+	param := OrderTrade{
+		Cmd:   "orderpending/trade",
+		Index: 1,
+		Body: OrderDetail{
+			Pair:         e.stockTypeMap[stockType],
+			Account_type: 0,
+			Order_type:   2,
+			Order_side:   1,
+			Price:        price,
+			Amount:       amount,
+		},
 	}
-	rateParam := fmt.Sprintf("rate=%f", price)
-	amountParam := fmt.Sprintf("amount=%f", amount)
-	params = append(params, rateParam, amountParam)
-	json, err := e.getAuthJSON(e.host+"private/buy", params)
+	params := []OrderTrade{}
+	params = append(params, param)
+	cmds, _ := json.Marshal(&params)
+
+	forms := []string{}
+	cmdsItem := "cmds=" + string(cmds)
+	keyItem := "apikey=" + e.option.AccessKey
+	signItem := "sign=" + e.getSign(string(cmds))
+	forms = append(forms, cmdsItem)
+	forms = append(forms, keyItem)
+	forms = append(forms, signItem)
+
+	resp, err := post(e.host+"orderpending", forms)
 	if err != nil {
-		e.logger.Log(constant.ERROR, "", 0.0, 0.0, "Buy() error, ", err)
+		e.logger.Log(constant.ERROR, "", 0.0, 0.0, "buy() error, ", err)
 		return false
 	}
-	if result := json.Get("result").MustString(); result != "true" {
-		e.logger.Log(constant.ERROR, "", 0.0, 0.0, "Buy() error, the error message => ", json.Get("message").MustString())
+
+	fmt.Println("buy: ", string(resp))
+	/// get result:
+	jsonResp, err := simplejson.NewJson(resp)
+	if err != nil {
+		e.logger.Log(constant.ERROR, "", 0.0, 0.0, "buy() error, ", err)
 		return false
 	}
+
+	if result := jsonResp.Get("error").Interface(); result != nil {
+		e.logger.Log(constant.ERROR, "", 0.0, 0.0, "buy() error, the error message => ", jsonResp.Get("error").Get("msg").MustString())
+		return false
+	}
+
+	jsons := jsonResp.Get("result").GetIndex(0)
+	orderID := jsons.Get("result").MustInt64()
+	// index := jsons.Get("index").MustInt64()
+	// cmd := jsons.Get("cmd").MustString()
+
 	e.logger.Log(constant.BUY, stockType, price, amount, msgs...)
-	return fmt.Sprint(json.Get("orderNumber").Interface())
+	return fmt.Sprint(orderID)
 }
 
 func (e *BIBOX) sell(stockType string, price, amount float64, msgs ...interface{}) interface{} {
-	params := []string{
-		"currencyPair=" + e.stockTypeMap[stockType] + "_usdt",
+	param := OrderTrade{
+		Cmd:   "orderpending/trade",
+		Index: 1,
+		Body: OrderDetail{
+			Pair:         e.stockTypeMap[stockType],
+			Account_type: 0,
+			Order_type:   2,
+			Order_side:   2,
+			Price:        price,
+			Amount:       amount,
+		},
 	}
-	rateParam := fmt.Sprintf("rate=%f", price)
-	amountParam := fmt.Sprintf("amount=%f", amount)
-	params = append(params, rateParam, amountParam)
-	json, err := e.getAuthJSON(e.host+"private/sell", params)
+	params := []OrderTrade{}
+	params = append(params, param)
+	cmds, _ := json.Marshal(&params)
+
+	forms := []string{}
+	cmdsItem := "cmds=" + string(cmds)
+	keyItem := "apikey=" + e.option.AccessKey
+	signItem := "sign=" + e.getSign(string(cmds))
+	forms = append(forms, cmdsItem)
+	forms = append(forms, keyItem)
+	forms = append(forms, signItem)
+
+	resp, err := post(e.host+"orderpending", forms)
 	if err != nil {
-		e.logger.Log(constant.ERROR, "", 0.0, 0.0, "Sell() error, ", err)
+		e.logger.Log(constant.ERROR, "", 0.0, 0.0, "sell() error, ", err)
 		return false
 	}
-	if result := json.Get("result").MustString(); result != "true" {
-		e.logger.Log(constant.ERROR, "", 0.0, 0.0, "Sell() error, the error message => ", json.Get("message").MustString())
+
+	fmt.Println("sell: ", string(resp))
+	/// get result:
+	jsonResp, err := simplejson.NewJson(resp)
+	if err != nil {
+		e.logger.Log(constant.ERROR, "", 0.0, 0.0, "sell() error, ", err)
 		return false
 	}
+
+	if result := jsonResp.Get("error").Interface(); result != nil {
+		e.logger.Log(constant.ERROR, "", 0.0, 0.0, "sell() error, the error message => ", jsonResp.Get("error").Get("msg").MustString())
+		return false
+	}
+
+	jsons := jsonResp.Get("result").GetIndex(0)
+	orderID := jsons.Get("result").MustInt64()
+	// index := jsons.Get("index").MustInt64()
+	// cmd := jsons.Get("cmd").MustString()
+
 	e.logger.Log(constant.SELL, stockType, price, amount, msgs...)
-	return fmt.Sprint(json.Get("orderNumber").Interface())
+	return fmt.Sprint(orderID)
 }
 
 // GetOrder get details of an order
