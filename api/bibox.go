@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -19,7 +20,9 @@ import (
 // BIBOX the exchange struct of bibox.io
 type BIBOX struct {
 	stockTypeMap     map[string]string
+	stocksTypeMap    map[string][2]string
 	tradeTypeMap     map[string]string
+	orderSideMap     map[int64]string
 	recordsPeriodMap map[string]string
 	minAmountMap     map[string]float64
 	records          map[string][]Record
@@ -42,11 +45,22 @@ func NewBibox(opt Option) Exchange {
 			"ONT/USDT":  "ONT_USDT",
 			"QTUM/USDT": "QTUM_USDT",
 		},
+		stocksTypeMap: map[string][2]string{
+			"BTC/USDT":  [2]string{"BTC", "USDT"},
+			"ETH/USDT":  [2]string{"ETH", "USDT"},
+			"EOS/USDT":  [2]string{"EOS", "USDT"},
+			"ONT/USDT":  [2]string{"ONT", "USDT"},
+			"QTUM/USDT": [2]string{"QTUM", "USDT"},
+		},
 		tradeTypeMap: map[string]string{
 			"buy":         constant.TradeTypeBuy,
 			"sell":        constant.TradeTypeSell,
 			"buy_market":  constant.TradeTypeBuy,
 			"sell_market": constant.TradeTypeSell,
+		},
+		orderSideMap: map[int64]string{
+			1: constant.TradeTypeBuy,
+			2: constant.TradeTypeSell,
 		},
 		recordsPeriodMap: map[string]string{
 			"M":   "1min",
@@ -347,92 +361,313 @@ func (e *BIBOX) sell(stockType string, price, amount float64, msgs ...interface{
 	return fmt.Sprint(orderID)
 }
 
+type OrderRequest struct {
+	Cmd  string           `json:"cmd"`
+	Body OrderRequestBody `json:"body"`
+}
+
+type OrderRequestBody struct {
+	ID int64 `json:"id"`
+}
+
 // GetOrder get details of an order
 func (e *BIBOX) GetOrder(stockType, id string) interface{} {
-	stockType = strings.ToUpper(stockType)
-	if _, ok := e.stockTypeMap[stockType]; !ok {
-		e.logger.Log(constant.ERROR, "", 0.0, 0.0, "GetOrder() error, unrecognized stockType: ", stockType)
-		return false
+	idInt, err := strconv.ParseInt(id, 10, 64)
+	param := OrderRequest{
+		Cmd: "orderpending/order",
+		Body: OrderRequestBody{
+			ID: idInt,
+		},
 	}
-	params := []string{
-		"currencyPair=" + e.stockTypeMap[stockType] + "_usdt",
-		"orderNumber=" + id,
-	}
-	json, err := e.getAuthJSON(e.host+"private/getOrder", params)
+	params := []OrderRequest{}
+	params = append(params, param)
+	cmds, _ := json.Marshal(&params)
+
+	forms := []string{}
+	cmdsItem := "cmds=" + string(cmds)
+	keyItem := "apikey=" + e.option.AccessKey
+	signItem := "sign=" + e.getSign(string(cmds))
+	forms = append(forms, cmdsItem)
+	forms = append(forms, keyItem)
+	forms = append(forms, signItem)
+
+	resp, err := post(e.host+"orderpending", forms)
 	if err != nil {
 		e.logger.Log(constant.ERROR, "", 0.0, 0.0, "GetOrder() error, ", err)
 		return false
 	}
-	if result := json.Get("result").MustString(); result != "true" {
-		e.logger.Log(constant.ERROR, "", 0.0, 0.0, "GetOrder() error, the error message => ", json.Get("message").MustString())
+
+	fmt.Println("GetOrder resp: ", string(resp))
+	/// get result:
+	jsonResp, err := simplejson.NewJson(resp)
+	if err != nil {
+		e.logger.Log(constant.ERROR, "", 0.0, 0.0, "GetOrder() error, ", err)
 		return false
 	}
-	orderJSON := json.Get("order")
-	return Order{
-		ID:         fmt.Sprint(orderJSON.Get("orderNumber").Interface()),
-		Price:      conver.Float64Must(orderJSON.Get("rate").Interface()),
-		Amount:     conver.Float64Must(orderJSON.Get("initialAmount").Interface()),
-		DealAmount: conver.Float64Must(orderJSON.Get("filledAmount").Interface()),
-		TradeType:  e.tradeTypeMap[orderJSON.Get("type").MustString()],
-		StockType:  stockType,
+
+	if result := jsonResp.Get("error").Interface(); result != nil {
+		e.logger.Log(constant.ERROR, "", 0.0, 0.0, "GetOrder() error, the error message => ", jsonResp.Get("error").Get("msg").MustString())
+		return false
 	}
+
+	jsons := jsonResp.Get("result").GetIndex(0)
+	orderJSON := jsons.Get("result")
+	orderID := orderJSON.Get("id").MustInt64()
+	price := orderJSON.Get("price").MustFloat64()
+	amount := orderJSON.Get("amount").MustFloat64()
+	dealAmount := orderJSON.Get("deal_amount").MustFloat64()
+	tradeType := e.orderSideMap[orderJSON.Get("order_side").MustInt64()]
+	symbol := orderJSON.Get("pair").MustString()
+
+	return Order{
+		ID:         fmt.Sprint(orderID),
+		Price:      price,
+		Amount:     amount,
+		DealAmount: dealAmount,
+		TradeType:  tradeType,
+		StockType:  symbol,
+	}
+}
+
+type OrderPendingRequest struct {
+	Cmd  string           `json:"cmd"`
+	Body OrderPendingBody `json:"body"`
+}
+
+type OrderPendingBody struct {
+	Account_type    int    `json:"account_type"`
+	Order_side      int    `json:"order_side"`
+	Page            int    `json:"page"`
+	Size            int    `json:"size"`
+	Coin_symbol     string `json:"coin_symbol"`
+	Currency_symbol string `json:"currency_symbol"`
 }
 
 // GetOrders get all unfilled orders
 func (e *BIBOX) GetOrders(stockType string) interface{} {
-	stockType = strings.ToUpper(stockType)
-	orders := []Order{}
-	if _, ok := e.stockTypeMap[stockType]; !ok {
+	ordersBid := e.getOrders(1, stockType).([]Order)
+	ordersAsk := e.getOrders(2, stockType).([]Order)
+	orders := append(ordersBid, ordersAsk...)
+
+	fmt.Println("GetOrders orders: ", orders)
+
+	return orders
+}
+
+func (e *BIBOX) getOrders(tradeType int, stockType string) interface{} {
+	coins, ok := e.stocksTypeMap[stockType]
+	if !ok {
 		e.logger.Log(constant.ERROR, "", 0.0, 0.0, "GetOrders() error, unrecognized stockType: ", stockType)
 		return false
 	}
-	json, err := e.getAuthJSON(e.host+"private/openOrders", []string{})
+	param := OrderPendingRequest{
+		Cmd: "orderpending/orderPendingList",
+		Body: OrderPendingBody{
+			Account_type:    0,
+			Order_side:      tradeType,
+			Page:            1,
+			Size:            1000,
+			Coin_symbol:     coins[0],
+			Currency_symbol: coins[1],
+		},
+	}
+	params := []OrderPendingRequest{}
+	params = append(params, param)
+	cmds, _ := json.Marshal(&params)
+
+	forms := []string{}
+	cmdsItem := "cmds=" + string(cmds)
+	keyItem := "apikey=" + e.option.AccessKey
+	signItem := "sign=" + e.getSign(string(cmds))
+	forms = append(forms, cmdsItem)
+	forms = append(forms, keyItem)
+	forms = append(forms, signItem)
+
+	resp, err := post(e.host+"orderpending", forms)
 	if err != nil {
 		e.logger.Log(constant.ERROR, "", 0.0, 0.0, "GetOrders() error, ", err)
 		return false
 	}
-	if result := json.Get("result").MustString(); result != "true" {
-		e.logger.Log(constant.ERROR, "", 0.0, 0.0, "GetOrders() error, the error message => ", json.Get("message").MustString())
+
+	fmt.Println("GetOrders resp: ", string(resp))
+	/// get result:
+	jsonResp, err := simplejson.NewJson(resp)
+	if err != nil {
+		e.logger.Log(constant.ERROR, "", 0.0, 0.0, "GetOrders() error, ", err)
 		return false
 	}
-	ordersJSON := json.Get("orders")
+
+	if result := jsonResp.Get("error").Interface(); result != nil {
+		e.logger.Log(constant.ERROR, "", 0.0, 0.0, "GetOrders() error, the error message => ", jsonResp.Get("error").Get("msg").MustString())
+		return false
+	}
+
+	orders := []Order{}
+	jsons := jsonResp.Get("result").GetIndex(0)
+	ordersJSON := jsons.Get("result").Get("items")
 	count := len(ordersJSON.MustArray())
 	for i := 0; i < count; i++ {
 		orderJSON := ordersJSON.GetIndex(i)
 		orders = append(orders, Order{
-			ID:         fmt.Sprint(orderJSON.Get("orderNumber").Interface()),
-			Price:      conver.Float64Must(orderJSON.Get("initialRate").Interface()),
-			Amount:     conver.Float64Must(orderJSON.Get("initialAmount").Interface()),
-			DealAmount: conver.Float64Must(orderJSON.Get("filledAmount").Interface()),
-			TradeType:  e.tradeTypeMap[orderJSON.Get("type").MustString()],
-			StockType:  stockType,
+
+			ID:         fmt.Sprint(orderJSON.Get("id").MustInt64()),
+			Price:      orderJSON.Get("price").MustFloat64(),
+			Amount:     orderJSON.Get("amount").MustFloat64(),
+			DealAmount: orderJSON.Get("deal_amount").MustFloat64(),
+			TradeType:  e.orderSideMap[orderJSON.Get("order_side").MustInt64()],
+			StockType:  orderJSON.Get("coin_symbol").MustString() + orderJSON.Get("currency_symbol").MustString(),
 		})
 	}
+
 	return orders
 }
 
 // GetTrades get all filled orders recently
 func (e *BIBOX) GetTrades(stockType string) interface{} {
-	return nil
+
+	ordersBid := e.getOrders(1, stockType).([]Order)
+	ordersAsk := e.getOrders(2, stockType).([]Order)
+	orders := append(ordersBid, ordersAsk...)
+
+	fmt.Println("GetTrades orders: ", orders)
+
+	return orders
+}
+
+func (e *BIBOX) getTrades(tradeType int, stockType string) interface{} {
+	coins, ok := e.stocksTypeMap[stockType]
+	if !ok {
+		e.logger.Log(constant.ERROR, "", 0.0, 0.0, "getTrades() error, unrecognized stockType: ", stockType)
+		return false
+	}
+	param := OrderPendingRequest{
+		Cmd: "orderpending/pendingHistoryList",
+		Body: OrderPendingBody{
+			Account_type:    0,
+			Order_side:      tradeType,
+			Page:            1,
+			Size:            1000,
+			Coin_symbol:     coins[0],
+			Currency_symbol: coins[1],
+		},
+	}
+	params := []OrderPendingRequest{}
+	params = append(params, param)
+	cmds, _ := json.Marshal(&params)
+
+	forms := []string{}
+	cmdsItem := "cmds=" + string(cmds)
+	keyItem := "apikey=" + e.option.AccessKey
+	signItem := "sign=" + e.getSign(string(cmds))
+	forms = append(forms, cmdsItem)
+	forms = append(forms, keyItem)
+	forms = append(forms, signItem)
+
+	resp, err := post(e.host+"orderpending", forms)
+	if err != nil {
+		e.logger.Log(constant.ERROR, "", 0.0, 0.0, "getTrades() error, ", err)
+		return false
+	}
+
+	fmt.Println("getTrades resp: ", string(resp))
+	/// get result:
+	jsonResp, err := simplejson.NewJson(resp)
+	if err != nil {
+		e.logger.Log(constant.ERROR, "", 0.0, 0.0, "getTrades() error, ", err)
+		return false
+	}
+
+	if result := jsonResp.Get("error").Interface(); result != nil {
+		e.logger.Log(constant.ERROR, "", 0.0, 0.0, "getTrades() error, the error message => ", jsonResp.Get("error").Get("msg").MustString())
+		return false
+	}
+
+	orders := []Order{}
+	jsons := jsonResp.Get("result").GetIndex(0)
+	ordersJSON := jsons.Get("result").Get("items")
+	count := len(ordersJSON.MustArray())
+	for i := 0; i < count; i++ {
+		orderJSON := ordersJSON.GetIndex(i)
+		orders = append(orders, Order{
+
+			ID:         fmt.Sprint(orderJSON.Get("id").MustInt64()),
+			Price:      orderJSON.Get("price").MustFloat64(),
+			Amount:     orderJSON.Get("amount").MustFloat64(),
+			DealAmount: orderJSON.Get("deal_amount").MustFloat64(),
+			TradeType:  e.orderSideMap[orderJSON.Get("order_side").MustInt64()],
+			StockType:  orderJSON.Get("coin_symbol").MustString() + orderJSON.Get("currency_symbol").MustString(),
+		})
+	}
+
+	return orders
+}
+
+type OrderCancelRequest struct {
+	Cmd   string          `json:"cmd"`
+	Index int             `json:"index"`
+	Body  OrderCancelBody `json:"body"`
+}
+
+type OrderCancelBody struct {
+	ID int64 `json:"id"`
 }
 
 // CancelOrder cancel an order
 func (e *BIBOX) CancelOrder(order Order) bool {
-	params := []string{
-		"currencyPair=" + e.stockTypeMap[order.StockType] + "_usdt",
-		"orderNumber=" + order.ID,
+	idInt, err := strconv.ParseInt(order.ID, 10, 64)
+	param := OrderCancelRequest{
+		Cmd:   "orderpending/cancelTrade",
+		Index: 1,
+		Body: OrderCancelBody{
+			ID: idInt,
+		},
 	}
-	json, err := e.getAuthJSON(e.host+"private/cancelOrder", params)
+	params := []OrderCancelRequest{}
+	params = append(params, param)
+	cmds, _ := json.Marshal(&params)
+
+	forms := []string{}
+	cmdsItem := "cmds=" + string(cmds)
+	keyItem := "apikey=" + e.option.AccessKey
+	signItem := "sign=" + e.getSign(string(cmds))
+	forms = append(forms, cmdsItem)
+	forms = append(forms, keyItem)
+	forms = append(forms, signItem)
+
+	resp, err := post(e.host+"orderpending", forms)
 	if err != nil {
 		e.logger.Log(constant.ERROR, "", 0.0, 0.0, "CancelOrder() error, ", err)
 		return false
 	}
-	if result := json.Get("result").MustBool(); !result {
-		e.logger.Log(constant.ERROR, "", 0.0, 0.0, "CancelOrder() error, the error message => ", json.Get("message").MustString())
+
+	fmt.Println("CancelOrder resp: ", string(resp))
+	/// get result:
+	jsonResp, err := simplejson.NewJson(resp)
+	if err != nil {
+		e.logger.Log(constant.ERROR, "", 0.0, 0.0, "CancelOrder() error, ", err)
 		return false
 	}
-	e.logger.Log(constant.CANCEL, order.StockType, order.Price, order.Amount-order.DealAmount, order)
+
+	if result := jsonResp.Get("error").Interface(); result != nil {
+		e.logger.Log(constant.ERROR, "", 0.0, 0.0, "CancelOrder() error, the error message => ", jsonResp.Get("error").Get("msg").MustString())
+		return false
+	}
+
+	jsons := jsonResp.Get("result").GetIndex(0)
+	msg := jsons.Get("result").MustString()
+
+	e.logger.Log(constant.CANCEL, order.StockType, order.Price, order.Amount-order.DealAmount, msg)
 	return true
+}
+
+// GetTicker get market ticker & depth
+func (e *BIBOX) GetTicker(stockType string, sizes ...interface{}) interface{} {
+	ticker, err := e.getTicker(stockType, sizes...)
+	if err != nil {
+		e.logger.Log(constant.ERROR, "", 0.0, 0.0, err)
+		return false
+	}
+	return ticker
 }
 
 // getTicker get market ticker & depth
@@ -476,16 +711,6 @@ func (e *BIBOX) getTicker(stockType string, sizes ...interface{}) (ticker Ticker
 	ticker.Sell = ticker.Asks[0].Price
 	ticker.Mid = (ticker.Buy + ticker.Sell) / 2
 	return
-}
-
-// GetTicker get market ticker & depth
-func (e *BIBOX) GetTicker(stockType string, sizes ...interface{}) interface{} {
-	ticker, err := e.getTicker(stockType, sizes...)
-	if err != nil {
-		e.logger.Log(constant.ERROR, "", 0.0, 0.0, err)
-		return false
-	}
-	return ticker
 }
 
 // GetRecords get candlestick data
