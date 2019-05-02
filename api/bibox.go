@@ -413,9 +413,9 @@ func (e *BIBOX) GetOrder(stockType, id string) interface{} {
 	jsons := jsonResp.Get("result").GetIndex(0)
 	orderJSON := jsons.Get("result")
 	orderID := orderJSON.Get("id").MustInt64()
-	price := orderJSON.Get("price").MustFloat64()
-	amount := orderJSON.Get("amount").MustFloat64()
-	dealAmount := orderJSON.Get("deal_amount").MustFloat64()
+	price := conver.Float64Must(orderJSON.Get("price").Interface())
+	amount := conver.Float64Must(orderJSON.Get("amount").Interface())
+	dealAmount := conver.Float64Must(orderJSON.Get("deal_amount").Interface())
 	tradeType := e.orderSideMap[orderJSON.Get("order_side").MustInt64()]
 	symbol := orderJSON.Get("pair").MustString()
 
@@ -511,9 +511,9 @@ func (e *BIBOX) getOrders(tradeType int, stockType string) interface{} {
 		orders = append(orders, Order{
 
 			ID:         fmt.Sprint(orderJSON.Get("id").MustInt64()),
-			Price:      orderJSON.Get("price").MustFloat64(),
-			Amount:     orderJSON.Get("amount").MustFloat64(),
-			DealAmount: orderJSON.Get("deal_amount").MustFloat64(),
+			Price:      conver.Float64Must(orderJSON.Get("price").Interface()),
+			Amount:     conver.Float64Must(orderJSON.Get("amount").Interface()),
+			DealAmount: conver.Float64Must(orderJSON.Get("deal_amount").Interface()),
 			TradeType:  e.orderSideMap[orderJSON.Get("order_side").MustInt64()],
 			StockType:  orderJSON.Get("coin_symbol").MustString() + orderJSON.Get("currency_symbol").MustString(),
 		})
@@ -525,8 +525,8 @@ func (e *BIBOX) getOrders(tradeType int, stockType string) interface{} {
 // GetTrades get all filled orders recently
 func (e *BIBOX) GetTrades(stockType string) interface{} {
 
-	ordersBid := e.getOrders(1, stockType).([]Order)
-	ordersAsk := e.getOrders(2, stockType).([]Order)
+	ordersBid := e.getTrades(1, stockType).([]Order)
+	ordersAsk := e.getTrades(2, stockType).([]Order)
 	orders := append(ordersBid, ordersAsk...)
 
 	fmt.Println("GetTrades orders: ", orders)
@@ -591,9 +591,9 @@ func (e *BIBOX) getTrades(tradeType int, stockType string) interface{} {
 		orders = append(orders, Order{
 
 			ID:         fmt.Sprint(orderJSON.Get("id").MustInt64()),
-			Price:      orderJSON.Get("price").MustFloat64(),
-			Amount:     orderJSON.Get("amount").MustFloat64(),
-			DealAmount: orderJSON.Get("deal_amount").MustFloat64(),
+			Price:      conver.Float64Must(orderJSON.Get("price").Interface()),
+			Amount:     conver.Float64Must(orderJSON.Get("amount").Interface()),
+			DealAmount: conver.Float64Must(orderJSON.Get("deal_amount").Interface()),
 			TradeType:  e.orderSideMap[orderJSON.Get("order_side").MustInt64()],
 			StockType:  orderJSON.Get("coin_symbol").MustString() + orderJSON.Get("currency_symbol").MustString(),
 		})
@@ -677,39 +677,53 @@ func (e *BIBOX) getTicker(stockType string, sizes ...interface{}) (ticker Ticker
 		err = fmt.Errorf("GetTicker() error, unrecognized stockType: %+v", stockType)
 		return
 	}
-	resp, err := get(fmt.Sprintf("http://data.bibox.io/api2/1/orderBook/%v_usdt", e.stockTypeMap[stockType]))
+	resp, err := get(fmt.Sprintf("%s%s?cmd=depth&pair=%s&size=10", e.host, "mdata", e.stockTypeMap[stockType]))
 	if err != nil {
 		err = fmt.Errorf("GetTicker() error, %+v", err)
 		return
 	}
-	json, err := simplejson.NewJson(resp)
+
+	fmt.Println("getTicker resp: ", string(resp))
+	/// get result:
+	jsonResp, err := simplejson.NewJson(resp)
 	if err != nil {
-		err = fmt.Errorf("GetTicker() error, %+v", err)
+		e.logger.Log(constant.ERROR, "", 0.0, 0.0, "getTicker() error, ", err)
 		return
 	}
-	depthsJSON := json.Get("bids")
-	for i := 0; i < len(depthsJSON.MustArray()); i++ {
-		depthJSON := depthsJSON.GetIndex(i)
-		ticker.Bids = append(ticker.Bids, OrderBook{
-			Price:  depthJSON.GetIndex(0).MustFloat64(),
-			Amount: depthJSON.GetIndex(1).MustFloat64(),
-		})
+
+	if result := jsonResp.Get("error").Interface(); result != nil {
+		e.logger.Log(constant.ERROR, "", 0.0, 0.0, "getTicker() error, the error message => ", jsonResp.Get("error").Get("msg").MustString())
+		return
 	}
-	depthsJSON = json.Get("asks")
-	for i := len(depthsJSON.MustArray()); i > 0; i-- {
-		depthJSON := depthsJSON.GetIndex(i - 1)
+
+	ordersAsk := jsonResp.Get("result").Get("asks")
+	ordersBid := jsonResp.Get("result").Get("bids")
+	countAsk := len(ordersAsk.MustArray())
+	countBid := len(ordersBid.MustArray())
+	for i := 0; i < countAsk; i++ {
+		depthJSON := ordersAsk.GetIndex(i)
 		ticker.Asks = append(ticker.Asks, OrderBook{
-			Price:  depthJSON.GetIndex(0).MustFloat64(),
-			Amount: depthJSON.GetIndex(1).MustFloat64(),
+			Price:  conver.Float64Must(depthJSON.Get("price").Interface()),
+			Amount: conver.Float64Must(depthJSON.Get("volume").Interface()),
 		})
 	}
+	for i := 0; i < countBid; i++ {
+		depthJSON := ordersBid.GetIndex(i)
+		ticker.Bids = append(ticker.Bids, OrderBook{
+			Price:  conver.Float64Must(depthJSON.Get("price").Interface()),
+			Amount: conver.Float64Must(depthJSON.Get("volume").Interface()),
+		})
+	}
+
 	if len(ticker.Bids) < 1 || len(ticker.Asks) < 1 {
 		err = fmt.Errorf("GetTicker() error, can not get enough Bids or Asks")
 		return
 	}
+
 	ticker.Buy = ticker.Bids[0].Price
 	ticker.Sell = ticker.Asks[0].Price
 	ticker.Mid = (ticker.Buy + ticker.Sell) / 2
+
 	return
 }
 
