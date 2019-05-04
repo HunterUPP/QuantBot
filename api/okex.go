@@ -6,10 +6,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/bitly/go-simplejson"
-	"github.com/miaolz123/conver"
 	"github.com/HunterUPP/QuantBot/constant"
 	"github.com/HunterUPP/QuantBot/model"
+	"github.com/bitly/go-simplejson"
+	"github.com/miaolz123/conver"
 )
 
 // OKEX the exchange struct of okex.com
@@ -117,8 +117,10 @@ func (e *OKEX) getAuthJSON(url string, params []string) (json *simplejson.Json, 
 	e.lastTimes++
 	params = append(params, "api_key="+e.option.AccessKey)
 	sort.Strings(params)
-	params = append(params, "secret_key="+e.option.SecretKey)
-	params = append(params, "sign="+strings.ToUpper(signMd5(params)))
+	strToSign := append(params, "secret_key="+e.option.SecretKey)
+	// params = append(params, "secret_key="+e.option.SecretKey)
+	params = append(params, "sign="+strings.ToUpper(signMd5(strToSign)))
+
 	resp, err := post(url, params)
 	if err != nil {
 		return
@@ -133,6 +135,8 @@ func (e *OKEX) GetAccount() interface{} {
 		e.logger.Log(constant.ERROR, "", 0.0, 0.0, "GetAccount() error, ", err)
 		return false
 	}
+
+	fmt.Println("response: ", json)
 	if result := json.Get("result").MustBool(); !result {
 		err = fmt.Errorf("GetAccount() error, the error number is %v", json.Get("error_code").MustInt())
 		e.logger.Log(constant.ERROR, "", 0.0, 0.0, "GetAccount() error, ", err)
