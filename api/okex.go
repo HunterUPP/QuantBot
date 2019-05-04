@@ -110,10 +110,6 @@ func (e *OKEX) GetMinAmount(stock string) float64 {
 }
 
 func (e *OKEX) getAuthJSON(url string, params []string) (json *simplejson.Json, err error) {
-
-	// os.Setenv("HTTP_PROXY", "http://127.0.0.1:6667")
-	// os.Setenv("HTTPS_PROXY", "https://127.0.0.1:6667")
-
 	e.lastTimes++
 	params = append(params, "api_key="+e.option.AccessKey)
 	sort.Strings(params)
@@ -244,6 +240,9 @@ func (e *OKEX) GetOrder(stockType, id string) interface{} {
 		e.logger.Log(constant.ERROR, "", 0.0, 0.0, "GetOrder() error, ", err)
 		return false
 	}
+
+	fmt.Println(json)
+	//// To get result:
 	if result := json.Get("result").MustBool(); !result {
 		e.logger.Log(constant.ERROR, "", 0.0, 0.0, "GetOrder() error, the error number is ", json.Get("error_code").MustInt())
 		return false
@@ -259,8 +258,10 @@ func (e *OKEX) GetOrder(stockType, id string) interface{} {
 			TradeType:  e.tradeTypeMap[orderJSON.Get("type").MustString()],
 			StockType:  stockType,
 		}
+	} else {
+		e.logger.Log(constant.INFO, "", 0.0, 0.0, "order(id = "+id+") not exist.", json.Get("error_code").MustInt())
+		return true
 	}
-	return false
 }
 
 // GetOrders get all unfilled orders
@@ -279,6 +280,9 @@ func (e *OKEX) GetOrders(stockType string) interface{} {
 		e.logger.Log(constant.ERROR, "", 0.0, 0.0, "GetOrders() error, ", err)
 		return false
 	}
+
+	fmt.Println(json)
+	//// To get result:
 	if result := json.Get("result").MustBool(); !result {
 		e.logger.Log(constant.ERROR, "", 0.0, 0.0, "GetOrders() error, the error number is ", json.Get("error_code").MustInt())
 		return false
@@ -318,6 +322,9 @@ func (e *OKEX) GetTrades(stockType string) interface{} {
 		e.logger.Log(constant.ERROR, "", 0.0, 0.0, "GetTrades() error, ", err)
 		return false
 	}
+
+	fmt.Println(json)
+	//// To get result:
 	if result := json.Get("result").MustBool(); !result {
 		e.logger.Log(constant.ERROR, "", 0.0, 0.0, "GetTrades() error, the error number is ", json.Get("error_code").MustInt())
 		return false
@@ -350,6 +357,9 @@ func (e *OKEX) CancelOrder(order Order) bool {
 		e.logger.Log(constant.ERROR, "", 0.0, 0.0, "CancelOrder() error, ", err)
 		return false
 	}
+
+	fmt.Println("json: ", json)
+	//// To get result:
 	if result := json.Get("result").MustBool(); !result {
 		e.logger.Log(constant.ERROR, "", 0.0, 0.0, "CancelOrder() error, the error number is ", json.Get("error_code").MustInt())
 		return false
